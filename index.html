@@ -9,16 +9,18 @@
 <link rel="manifest" href="data:application/octet-stream;base64,eyJiYWNrZ3JvdW5kX2NvbG9yIjoiIzBlMTMwZiIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiaWNvbnMiOlt7InNpemVzIjoiMTkyeDE5MiIsInNyYyI6Imljb24tMTkyLnBuZyIsInR5cGUiOiJpbWFnZS9wbmcifSx7InB1cnBvc2UiOiJhbnkiLCJzaXplcyI6IjUxMng1MTIiLCJzcmMiOiJpY29uLTUxMi5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIn1dLCJuYW1lIjoi44Oq44OQ44O844K344O744Kr44Kq44K5Iiwic2NvcGUiOiIuLi8iLCJzaG9ydF9uYW1lIjoi44Oq44OQ44O844K344O744Kr44Kq44K5Iiwic3RhcnRfdXJsIjoiLi4vIiwidGhlbWVfY29sb3IiOiIjMGUxMzBmIn0=" />
 <meta name="theme-color" content="#0e130f" />
 <title>リバーシ・カオス</title>
+<meta name="description" content="AI時代の予測不能なオセロ。4色の石がペアで裏返る、4人対戦リバーシ。連鎖モード・ガチャ石・CHAOS SCORE搭載。" />
 <meta property="og:title" content="リバーシ・カオス" />
 <meta property="og:description" content="AI時代の予測不能なオセロ。4色の石がペアで裏返る、4人対戦リバーシ。連鎖モード・ガチャ石・CHAOS SCORE搭載。" />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://reversi-chaos.vercel.app/" />
 <meta property="og:image" content="https://reversi-chaos.vercel.app/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="リバーシ・カオス" />
-<meta name="twitter:description" content="AI時代の予測不能なオセロ。4色の石がペアで裏返る、4人対戦リバーシ。" />
+<meta name="twitter:description" content="AI時代の予測不能なオセロ。4色の石がペアで裏返る、4人対戦リバーシ。連鎖モード・ガチャ石・CHAOS SCORE搭載。" />
 <meta name="twitter:image" content="https://reversi-chaos.vercel.app/og-image.png" />
-
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Noto+Sans+JP:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -221,6 +223,8 @@
   .rankrow .mini{width:26px;height:26px;border-radius:50%;box-shadow:inset 0 -3px 5px rgba(0,0,0,.28)}
   .rankrow .cnt{margin-left:auto;font-weight:800;font-size:19px;font-family:"M PLUS Rounded 1c",sans-serif}
   .crown{color:var(--gold)}
+  .resultcard .lobbybtn{width:100%;padding:11px;font-size:14.5px;border-radius:12px;margin-top:8px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);font-weight:700;cursor:pointer;font-family:"M PLUS Rounded 1c",sans-serif}
+  .resultcard .lobbybtn:active{transform:scale(.99)}
 
   /* Prediction (watch mode) */
   #predictPanel{border:2px solid var(--gold)}
@@ -881,6 +885,7 @@
   <div class="msep"></div>
   <button type="button" id="menuSound">サウンド<small id="menuSoundState">OFF</small></button>
   <button type="button" id="menuRestart">リスタート<small>最初から</small></button>
+  <button type="button" id="menuLobby">ロビーに戻る<small>設定画面へ</small></button>
 </nav>
 
 <div id="tutOverlay" role="dialog" aria-modal="true" aria-label="チュートリアル">
@@ -907,6 +912,7 @@
     <div class="chaosresult" id="chaosResult" style="display:none"></div>
     <div id="resultRows"></div>
     <button type="button" class="bigbtn" id="againBtn">もう一度遊ぶ</button>
+    <button type="button" class="lobbybtn" id="lobbyBtn">ロビーに戻る</button>
   </div>
 </div>
 
@@ -971,6 +977,7 @@ var historyLog=[];
 var lastMove=null;
 var consecutivePasses=0;
 var gameOver=false;
+var inLobby=false; /* parked on the settings screen between games: board reset, no game running */
 var animating=false;
 var moveNumber=0;
 var flipAnimCells={}; /* key -> true while animating */
@@ -1177,8 +1184,18 @@ function auInit(){
   /* If the context drops out of 'running' on its own (iOS 'interrupted', webview
      audio-session changes), pull it back whenever sound is meant to be on. */
   ctx.onstatechange=function(){ auEnsureRunning(); };
-  au.master = ctx.createGain(); au.master.gain.value = au.vol; au.master.connect(ctx.destination);
-  au.bgmBus = ctx.createGain(); au.bgmBus.gain.value = 0.42; au.bgmBus.connect(au.master);
+  au.master = ctx.createGain(); au.master.gain.value = au.vol;
+  /* Master compressor: the boosted low end stays punchy without clipping. */
+  au.comp = ctx.createDynamicsCompressor();
+  au.comp.threshold.value=-14; au.comp.knee.value=18; au.comp.ratio.value=6;
+  au.comp.attack.value=0.003; au.comp.release.value=0.24;
+  au.master.connect(au.comp); au.comp.connect(ctx.destination);
+  au.bgmBus = ctx.createGain(); au.bgmBus.gain.value = 0.5;
+  /* Low shelf on the BGM bus only: +7 dB at/below 160 Hz for body-felt bass.
+     SE keeps its own dry path into the master. */
+  au.bgmShelf = ctx.createBiquadFilter(); au.bgmShelf.type='lowshelf';
+  au.bgmShelf.frequency.value=160; au.bgmShelf.gain.value=7;
+  au.bgmBus.connect(au.bgmShelf); au.bgmShelf.connect(au.master);
   au.seBus = ctx.createGain(); au.seBus.gain.value = 0.9; au.seBus.connect(au.master);
   var len = Math.floor(ctx.sampleRate);
   au.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -1251,7 +1268,7 @@ function bgmRampUpdate(){
   var occ=(64-countsOf(board).empty)/64;
   au.tempoTarget = occ<=0.5 ? 1+0.30*occ : 1.15+0.40*(occ-0.5);
   if(au.ctx && au.bgmBus){
-    au.bgmBus.gain.setTargetAtTime(0.42*(0.7+0.3*occ), au.ctx.currentTime, 0.6);
+    au.bgmBus.gain.setTargetAtTime(0.5*(0.7+0.3*occ), au.ctx.currentTime, 0.6);
   }
 }
 function auBgmStep(s, t, stepDur){
@@ -1259,8 +1276,13 @@ function auBgmStep(s, t, stepDur){
   var chord=BGM_CHORDS[bar];
   var pos=s%16;
   if(pos%4===0){
-    auTone({f0:midiHz(chord[0]), dur:stepDur*3.4, type:'triangle', vol:0.20, t:t, bus:au.bgmBus});
-    auTone({f0:midiHz(chord[0]-12), dur:stepDur*3.4, type:'sine', vol:0.10, t:t, bus:au.bgmBus});
+    /* Kick pulse on every beat: a sine thump sweeping 132 Hz down to 40 Hz —
+       the physical "in the chest" hit under the bass line. */
+    auTone({f0:132, f1:40, dur:0.14, type:'sine', vol:0.34, t:t, bus:au.bgmBus});
+    auTone({f0:midiHz(chord[0]), dur:stepDur*3.4, type:'triangle', vol:0.26, t:t, bus:au.bgmBus});
+    /* Sub-bass: sine one octave under the root (55 Hz on the Am bars),
+       louder and with a longer tail so it sustains between beats. */
+    auTone({f0:midiHz(chord[0]-12), dur:stepDur*3.9, type:'sine', vol:0.24, t:t, bus:au.bgmBus});
   }
   if(pos===14){
     auTone({f0:midiHz(chord[0]+7), dur:stepDur*1.8, type:'triangle', vol:0.10, t:t, bus:au.bgmBus});
@@ -1814,6 +1836,7 @@ async function executeMove(color,opt){
   advanceTurn();
 }
 function advanceTurn(){
+  if(inLobby){ renderAll(); return; } /* a move animation that outlived a lobby jump ends here */
   if(countsOf(board).empty===0){ finishGame(); return; }
   var p=current;
   var guard=0;
@@ -1902,6 +1925,7 @@ function finishGame(){
 }
 function scheduleCPU(){
   if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
+  if(inLobby) return; /* lobby: no game is running, CPU stays parked */
   if(gameOver || animating) return;
   if(watchState==='picking') return; /* watch mode waits for prediction + start button */
   if(control[current]==='cpu'){
@@ -1933,7 +1957,7 @@ var ctlGrid=document.getElementById('ctlGrid');
 function legalTargets(){
   /* returns map key -> {count, seed:bool} for human interaction */
   var hints={};
-  if(gameOver || animating || control[current]!=='human') return hints;
+  if(inLobby || gameOver || animating || control[current]!=='human') return hints;
   if(!config.gacha){
     legalMovesFor(board,current,null,config.chain).forEach(function(m){
       hints[key(m.r,m.c)]={count:m.sim.total,seed:false};
@@ -1997,6 +2021,11 @@ function renderBoard(){
 }
 function renderTurn(){
   turnStoneEl.className='turnstone c-'+current;
+  if(inLobby){
+    turnInfoEl.innerHTML='ロビー<small>対戦形式・オプション・プレイヤーを選んで「この設定ではじめから」で対局開始</small>';
+    boardNoteEl.textContent='いまはロビー（対戦設定画面）です。盤面・スコア・履歴はリセットされています。';
+    return;
+  }
   if(watchState==='picking'){
     turnInfoEl.innerHTML='観戦モード<small>勝者予想を選んで「観戦スタート」を押すと対局が始まります</small>';
     boardNoteEl.textContent='予想は色（チーム戦はチーム）から1つ、または「予想せずに観戦」を選べます。';
@@ -2338,7 +2367,7 @@ function renderAll(){
 
 /* ============ Interaction ============ */
 async function onCellClick(r,c){
-  if(gameOver || animating || control[current]!=='human') return;
+  if(inLobby || gameOver || animating || control[current]!=='human') return;
   var color=current;
   if(!config.gacha){
     var moves=legalMovesFor(board,color,null,config.chain);
@@ -2418,6 +2447,7 @@ function showResult(){
   document.getElementById('overlay').classList.add('show');
 }
 function startGame(){
+  inLobby=false;
   if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
   document.getElementById('overlay').classList.remove('show');
   hideChaosFinale();
@@ -2446,6 +2476,23 @@ function startGame(){
   }
   renderAll();
   scheduleCPU();
+}
+
+/* Back to the lobby: close the result popup and reset the board, scores,
+   clock and history to their initial state WITHOUT starting a new game.
+   Settings are kept exactly as chosen: format, options, player controls,
+   hint visibility, sound settings and the saved prediction record. */
+function returnToLobby(){
+  if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
+  document.getElementById('overlay').classList.remove('show');
+  hideChaosFinale();
+  inLobby=true;
+  cancelWatch();
+  setupBoard();
+  lastMove=null;
+  clockElapsed=0;
+  clockRunning=false;
+  renderAll();
 }
 
 /* ============ Settings wiring ============ */
@@ -2497,6 +2544,7 @@ document.getElementById('presetAll').addEventListener('click',function(){
 });
 document.getElementById('restartBtn').addEventListener('click', startGame);
 document.getElementById('againBtn').addEventListener('click', startGame);
+document.getElementById('lobbyBtn').addEventListener('click', returnToLobby);
 
 /* ============ Sound wiring ============ */
 document.getElementById('soundEnable').addEventListener('click', auToggleMaster);
@@ -2655,6 +2703,7 @@ document.getElementById('menuRules').addEventListener('click',function(){ menuGo
 document.getElementById('menuTut').addEventListener('click',function(){ setMenu(false); openTut(); });
 document.getElementById('menuSound').addEventListener('click',function(){ auToggleMaster(); });
 document.getElementById('menuRestart').addEventListener('click',function(){ setMenu(false); startGame(); });
+document.getElementById('menuLobby').addEventListener('click',function(){ returnToLobby(); menuGoTo(document.getElementById('settingsPanel')); });
 
 /* ============ Hint toggle + HUD clock ============ */
 var hintToggleEl=document.getElementById('hintToggle');
