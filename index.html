@@ -1176,7 +1176,7 @@ function drawPair(){
 
 /* ============ Audio: Web Audio synth (BGM + SE, no external files) ============ */
 var ACtor = window.AudioContext || window.webkitAudioContext;
-var au = { ctx:null, master:null, bgmBus:null, seBus:null, on:false, bgm:true, se:true, vol:0.7, step:0, nextT:0, timer:null, noiseBuf:null, tempoTarget:1, tempoCur:1 };
+var au = { ctx:null, master:null, bgmBus:null, seBus:null, on:false, bgm:true, se:true, vol:0.7, step:0, nextT:0, timer:null, noiseBuf:null, tempoTarget:1, tempoCur:1, stale:false, wedged:false, lastCt:-1, watchdog:null };
 function auInit(){
   if(au.ctx || !ACtor) return;
   var ctx = new ACtor();
@@ -1357,17 +1357,74 @@ function auEnsureRunning(){
     if(p && p.catch) p.catch(function(){});
   }
 }
+/* iOS/WKWebView can leave a context reporting state 'running' while its audio
+   session is actually dead (after a call, Siri, an app switch, or a silent-switch
+   session change): resume() is then a no-op and every state-based recovery above
+   misses it, so the game stays silent with the UI showing ON. The reliable cure
+   is to throw the context away and build a fresh one inside a user gesture.
+   'stale' marks a session that survived such an event; 'wedged' marks a
+   'running' context whose clock stopped advancing. Both recycle on next tap. */
+function auUnlockBlip(){
+  if(!au.ctx) return;
+  try{
+    var ctx=au.ctx;
+    var src=ctx.createBufferSource();
+    src.buffer=ctx.createBuffer(1, 1, ctx.sampleRate);
+    src.connect(ctx.destination);
+    src.start(0);
+  }catch(e){}
+}
+function auRecycle(){
+  var old=au.ctx;
+  auBgmStop();
+  au.ctx=null; au.master=null; au.comp=null; au.bgmBus=null; au.bgmShelf=null; au.seBus=null; au.noiseBuf=null;
+  au.stale=false; au.wedged=false; au.lastCt=-1;
+  if(old && old.close){ try{ var p=old.close(); if(p && p.catch) p.catch(function(){}); }catch(e){} }
+  auInit();
+  if(!au.ctx) return;
+  auEnsureRunning();
+  auUnlockBlip();
+  bgmRampUpdate();
+  if(au.bgm) auBgmStart();
+}
+function auRecover(){
+  if(!au.on) return;
+  if(!au.ctx){
+    auInit();
+    if(!au.ctx) return;
+    au.stale=false; au.wedged=false; au.lastCt=-1;
+    auEnsureRunning();
+    auUnlockBlip();
+    bgmRampUpdate();
+    if(au.bgm && !au.timer) auBgmStart();
+    return;
+  }
+  if(au.stale || au.wedged){ auRecycle(); return; }
+  auEnsureRunning();
+}
+function auWatchdogTick(){
+  if(!au.on || !au.ctx) return;
+  if(au.ctx.state==='closed'){ auBgmStop(); au.ctx=null; au.master=null; au.comp=null; au.bgmBus=null; au.bgmShelf=null; au.seBus=null; return; }
+  if(au.ctx.state!=='running'){ au.stale=true; auEnsureRunning(); return; }
+  var ct=au.ctx.currentTime;
+  if(au.lastCt>=0 && ct<=au.lastCt+0.001) au.wedged=true;
+  au.lastCt=ct;
+}
 function auToggleMaster(){
   if(!au.on){
     auInit();
     if(!au.ctx){ auUi(); return; }
     au.on=true;
+    au.stale=false; au.wedged=false; au.lastCt=-1;
     auEnsureRunning();
+    auUnlockBlip();
     bgmRampUpdate();
     if(au.bgm) auBgmStart();
+    if(!au.watchdog) au.watchdog=setInterval(auWatchdogTick, 1000);
   } else {
     au.on=false;
     auBgmStop();
+    if(au.watchdog){ clearInterval(au.watchdog); au.watchdog=null; }
     if(au.ctx) au.ctx.suspend();
   }
   auUi();
@@ -2548,9 +2605,18 @@ document.getElementById('lobbyBtn').addEventListener('click', returnToLobby);
 
 /* ============ Sound wiring ============ */
 document.getElementById('soundEnable').addEventListener('click', auToggleMaster);
-/* Any later tap is another chance to un-stick a suspended/interrupted context. */
+/* Any later tap is another chance to un-stick a suspended/interrupted context —
+   and, if the session went stale while parked, to recycle the context outright. */
 ['pointerdown','touchend'].forEach(function(evName){
-  document.addEventListener(evName, auEnsureRunning, {passive:true});
+  document.addEventListener(evName, auRecover, {passive:true});
+});
+/* Backgrounding is the classic trigger for a dead iOS audio session: mark the
+   session stale on the way out, try a plain resume on return, and let the next
+   tap recycle the context if that resume was only cosmetic. */
+document.addEventListener('visibilitychange',function(){
+  if(!au.on) return;
+  if(document.hidden){ au.stale=true; }
+  else { auEnsureRunning(); }
 });
 document.getElementById('bgmToggle').addEventListener('click',function(){
   au.bgm=!au.bgm;
