@@ -754,6 +754,52 @@
   .cell.seed:hover{background:#170c22}
   .hintdot .hnum{opacity:.55}
 </style>
+<style>
+  /* ===== Start gate: choose BGM on/off before the lobby ===== */
+  #startGate{
+    position:fixed; inset:0; z-index:2400; display:none;
+    align-items:center; justify-content:center; padding:20px;
+    background:
+      radial-gradient(720px 380px at 85% -5%, rgba(255,45,120,.16), rgba(255,45,120,0) 60%),
+      radial-gradient(720px 420px at 8% 108%, rgba(0,229,255,.14), rgba(0,229,255,0) 60%),
+      rgba(2,4,10,.97);
+  }
+  #startGate.show{display:flex}
+  .gate-inner{max-width:440px; width:100%; text-align:center}
+  .gate-stones{display:flex; gap:10px; justify-content:center; margin-bottom:16px}
+  .gate-cell{width:54px; height:54px; display:flex; align-items:center; justify-content:center}
+  .gate-title{
+    font-family:"M PLUS Rounded 1c",sans-serif; font-weight:800;
+    font-size:clamp(30px,7vw,42px); margin:6px 0 0; color:#eafcff;
+    text-shadow:0 0 22px rgba(0,229,255,.35); letter-spacing:.04em;
+  }
+  .gate-title .chaos{color:var(--mag); text-shadow:0 0 18px rgba(255,45,120,.75)}
+  .gate-tag{
+    font-family:"M PLUS Rounded 1c",sans-serif; font-weight:800;
+    font-size:clamp(16px,3.4vw,21px); color:var(--cyan);
+    text-shadow:0 0 14px rgba(0,229,255,.55); margin:6px 0 0; letter-spacing:.06em;
+  }
+  .gate-lead{color:var(--ink); font-size:14px; line-height:1.7; margin:18px 0 0}
+  .gate-btns{display:flex; flex-direction:column; gap:12px; margin-top:18px}
+  .gatebtn{
+    position:relative; width:100%; border-radius:14px; cursor:pointer; font-family:inherit;
+    padding:16px 16px 14px; text-align:center; color:var(--ink);
+  }
+  .gatebtn .gatebtn-main{
+    display:block; font-family:"M PLUS Rounded 1c",sans-serif; font-weight:800; font-size:18px;
+  }
+  .gatebtn .gatebtn-sub{display:block; font-size:12.5px; margin-top:3px; opacity:.85; line-height:1.5}
+  .gatebtn.on{background:var(--mag); border:1px solid var(--mag); color:#fff; box-shadow:0 0 18px rgba(255,45,120,.45)}
+  .gatebtn.off{background:rgba(6,12,24,.9); border:1px solid rgba(0,229,255,.55); color:#aef7ff}
+  .gatebtn:active{transform:scale(.99)}
+  .gatebtn.prev{outline:2px solid var(--gold); outline-offset:2px}
+  .gateprev{
+    position:absolute; top:-9px; right:12px; background:var(--gold); color:#241a00;
+    font-size:11px; font-weight:800; border-radius:4px; padding:1px 8px;
+    font-family:"M PLUS Rounded 1c",sans-serif;
+  }
+  .gate-note{color:var(--muted); font-size:12px; line-height:1.7; margin:16px 0 0}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -901,6 +947,34 @@
       <span class="sp"></span>
       <button type="button" class="tutbtn primary" id="tutNext">次へ</button>
     </div>
+  </div>
+</div>
+
+<div id="startGate" role="dialog" aria-modal="true" aria-label="スタート画面">
+  <div class="gate-inner">
+    <div class="gate-stones" aria-hidden="true">
+      <div class="gate-cell"><div class="stone c-black"></div></div>
+      <div class="gate-cell"><div class="stone c-red"></div></div>
+      <div class="gate-cell"><div class="stone c-blue"></div></div>
+      <div class="gate-cell"><div class="stone c-white"></div></div>
+    </div>
+    <p class="logoline">REVERSI//CHAOS</p>
+    <h2 class="gate-title glitch" data-text="リバーシ・カオス">リバーシ・<span class="chaos">カオス</span></h2>
+    <p class="gate-tag">AI時代の予測不能なオセロ</p>
+    <p class="gate-lead">対局をはじめる前に、BGMを鳴らすかどうか選んでください。</p>
+    <div class="gate-btns">
+      <button type="button" class="gatebtn on" id="gateBgmOn">
+        <span class="gateprev" id="gatePrevOn" style="display:none">前回の選択</span>
+        <span class="gatebtn-main">BGM ON でスタート</span>
+        <span class="gatebtn-sub">重低音のサイバーループを鳴らして始める</span>
+      </button>
+      <button type="button" class="gatebtn off" id="gateBgmOff">
+        <span class="gateprev" id="gatePrevOff" style="display:none">前回の選択</span>
+        <span class="gatebtn-main">BGM OFF でスタート</span>
+        <span class="gatebtn-sub">音なしで始める</span>
+      </button>
+    </div>
+    <p class="gate-note">BGM・効果音の設定は、対局中も右上のメニューやサウンドパネルから変更できます。</p>
   </div>
 </div>
 
@@ -2789,13 +2863,53 @@ if(hintToggleEl){
 syncHintBtn();
 setInterval(function(){ if(clockRunning) renderHud(); }, 500);
 
+/* ============ Start gate: choose BGM on/off before the lobby ============ */
+var gateEl=document.getElementById('startGate');
+var gateChoice=null; /* last BGM choice: 'on' | 'off' | null (never chosen) */
+try{ gateChoice=window.localStorage.getItem('reversi-chaos-bgm-choice'); }catch(e){}
+function showStartGate(){
+  if(!gateEl) return;
+  var onBtn=document.getElementById('gateBgmOn');
+  var offBtn=document.getElementById('gateBgmOff');
+  if(onBtn) onBtn.classList.toggle('prev', gateChoice==='on');
+  if(offBtn) offBtn.classList.toggle('prev', gateChoice==='off');
+  var onTag=document.getElementById('gatePrevOn');
+  var offTag=document.getElementById('gatePrevOff');
+  if(onTag) onTag.style.display = gateChoice==='on' ? '' : 'none';
+  if(offTag) offTag.style.display = gateChoice==='off' ? '' : 'none';
+  gateEl.classList.add('show');
+  var focusBtn = gateChoice==='off' ? offBtn : onBtn;
+  if(focusBtn) focusBtn.focus();
+}
+function chooseBgmAndStart(wantBgm){
+  /* The choice is a sound setting: it drives the in-game BGM toggle (au.bgm),
+     so the panel/menu switches reflect it and it can be changed later. SE is
+     left exactly as the existing sound settings have it. */
+  au.bgm=wantBgm;
+  try{ window.localStorage.setItem('reversi-chaos-bgm-choice', wantBgm?'on':'off'); }catch(e){}
+  if(wantBgm){
+    /* This tap is the user gesture: create/resume the AudioContext and start
+       the BGM inside it (this doubles as the iOS audio unlock). */
+    if(!au.on) auToggleMaster();
+    else { auEnsureRunning(); auBgmStart(); }
+  }
+  auUi();
+  if(gateEl) gateEl.classList.remove('show');
+  returnToLobby();
+  if(!tutSeen) openTut();
+}
+document.getElementById('gateBgmOn').addEventListener('click',function(){ chooseBgmAndStart(true); });
+document.getElementById('gateBgmOff').addEventListener('click',function(){ chooseBgmAndStart(false); });
+
 /* ============ Init ============ */
-clockStart=performance.now(); clockRunning=true;
+/* Parked in the lobby behind the start gate: the board is reset, the clock is
+   stopped and no CPU moves until the player picks BGM on/off and enters. */
+inLobby=true;
+clockElapsed=0; clockRunning=false;
 setupBoard();
 renderAll();
-scheduleCPU();
 tickerStart();
-if(!tutSeen) openTut();
+showStartGate();
 })();
 </script>
 </body>
